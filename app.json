@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "UFitness",
+    "slug": "UFitness",
+    "scheme": "ufitness",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.student.ufitness",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.student.ufitness",
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.ACTIVITY_RECOGNITION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Allow Ufitness to track your steps to calculate daily activity."
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Allow Ufitness to sync your class schedule from your calendar."
+        }
+      ],
+      "expo-web-browser",
+      "@react-native-community/datetimepicker",
+      "@react-native-google-signin/google-signin"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "699cff25-c98b-4f47-a679-a496af95bc6c"
+      }
+    }
+  }
+}
