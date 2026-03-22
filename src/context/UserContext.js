@@ -280,18 +280,13 @@ export const UserProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      // 1. Kill the database listener FIRST
       if (unsubscribeSnapshot.current) {
         unsubscribeSnapshot.current();
         unsubscribeSnapshot.current = null; 
       }
-
-      // 2. Clear the local offline cache
       if (user) {
         await AsyncStorage.removeItem(`@user_profile_${user.uid}`);
       }
-
-      // 3. Sign out of Firebase
       await signOut(auth);
     } catch (error) {
       console.error("Logout Error:", error);
@@ -303,26 +298,20 @@ export const UserProvider = ({ children }) => {
       const currentUser = auth.currentUser;
       if (!currentUser) return { success: false, error: "No user logged in." };
 
-      // 1. Kill listener to prevent crashes
       if (unsubscribeSnapshot.current) {
         unsubscribeSnapshot.current();
         unsubscribeSnapshot.current = null;
       }
 
-      // 2. Wipe Firestore data completely FIRST
       await deleteDoc(doc(db, 'users', currentUser.uid));
-      
-      // 3. Clear local offline cache
       await AsyncStorage.removeItem(`@user_profile_${currentUser.uid}`);
 
-      // 4. Attempt to delete Firebase Auth User
       try { 
         await deleteUser(currentUser); 
       } catch (authError) { 
         console.warn("Auth deletion required recent login, but Firestore data was completely wiped."); 
       }
 
-      // 5. Reset State & Sign Out
       await signOut(auth);
       setUserData(INITIAL_USER_DATA);
       setUser(null);
@@ -913,7 +902,7 @@ export const UserProvider = ({ children }) => {
         currentSessionSteps.current = 0;
         
         if (user) {
-          await updateDoc(doc(db, 'users', user.uid), { "stats.steps": newSteps });
+          try { await updateDoc(doc(db, 'users', user.uid), { "stats.steps": newSteps }); } catch (e) {}
           
           try {
              const pastEntries = []; 
@@ -1002,17 +991,20 @@ export const UserProvider = ({ children }) => {
     
     setUserData(prev => ({ ...prev, history: newHistory, stats: newStats }));
     
-    await updateDoc(doc(db, 'users', user.uid), { 
-      history: arrayUnion(entry), 
-      "stats.streak": newStats.streak, 
-      "stats.bestStreak": newStats.bestStreak, 
-      "stats.caloriesBurnedTotal": newStats.caloriesBurnedTotal, 
-      "stats.caloriesBurnedToday": newStats.caloriesBurnedToday, 
-      "stats.minutes": newStats.minutes, 
-      "stats.workoutsCompletedTotal": newStats.workoutsCompletedTotal, 
-      "stats.workoutsCompletedToday": newStats.workoutsCompletedToday, 
-      "stats.weeklyGoalCurrent": newStats.weeklyGoalCurrent
-    });
+    // OFFLINE FIX: Using try...catch so it gracefully queues the write locally without crashing
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { 
+        history: arrayUnion(entry), 
+        "stats.streak": newStats.streak, 
+        "stats.bestStreak": newStats.bestStreak, 
+        "stats.caloriesBurnedTotal": newStats.caloriesBurnedTotal, 
+        "stats.caloriesBurnedToday": newStats.caloriesBurnedToday, 
+        "stats.minutes": newStats.minutes, 
+        "stats.workoutsCompletedTotal": newStats.workoutsCompletedTotal, 
+        "stats.workoutsCompletedToday": newStats.workoutsCompletedToday, 
+        "stats.weeklyGoalCurrent": newStats.weeklyGoalCurrent
+      });
+    } catch(e) { console.log("Offline: Workout cached locally."); }
   };
 
   const addWater = async () => {
@@ -1024,10 +1016,13 @@ export const UserProvider = ({ children }) => {
     
     setUserData(prev => ({ ...prev, history: newHistory, stats: newStats }));
     
-    await updateDoc(doc(db, 'users', user.uid), { 
-      history: arrayUnion(entry), 
-      "stats.hydrationCurrent": newStats.hydrationCurrent 
-    });
+    // OFFLINE FIX: Using try...catch
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { 
+        history: arrayUnion(entry), 
+        "stats.hydrationCurrent": newStats.hydrationCurrent 
+      });
+    } catch(e) { console.log("Offline: Water cached locally."); }
   };
 
   const updateSteps = async (steps) => {
@@ -1035,7 +1030,7 @@ export const UserProvider = ({ children }) => {
     try { 
       await updateDoc(doc(db, 'users', user.uid), { 'stats.steps': steps }); 
     } catch (e) {
-      console.error("Error updating steps", e);
+      console.log("Offline: Steps cached locally.");
     }
   };
 
@@ -1058,7 +1053,10 @@ export const UserProvider = ({ children }) => {
     };
     
     setUserData(prev => ({ ...prev, ...resetState }));
-    await updateDoc(doc(db, 'users', user.uid), resetState); 
+    
+    try {
+      await updateDoc(doc(db, 'users', user.uid), resetState); 
+    } catch(e) { console.log("Offline: Reset cached locally."); }
     
     sessionStartSteps.current = 0; 
     currentSessionSteps.current = 0;
@@ -1067,6 +1065,14 @@ export const UserProvider = ({ children }) => {
   // ============================================================
   // 8. EFFECTS & LISTENERS
   // ============================================================
+
+  // --- NEW: BULLETPROOF OFFLINE CACHE SYNC ---
+  // Automatically saves your state to the phone ANY time a workout, water, or setting updates.
+  useEffect(() => {
+    if (user && userData && userData.isSetupComplete) {
+      AsyncStorage.setItem(`@user_profile_${user.uid}`, JSON.stringify(userData)).catch(() => {});
+    }
+  }, [userData, user]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
@@ -1101,16 +1107,14 @@ export const UserProvider = ({ children }) => {
            await updateDoc(doc(db, 'users', user.uid), { "stats.steps": totalSteps }); 
            sessionStartSteps.current = totalSteps; 
            currentSessionSteps.current = 0; 
-         } catch(e) {
-           console.error("Step Auto-Save Error", e);
-         }
+         } catch(e) {}
       }
     }, 10000); 
     
     return () => clearInterval(saveInterval);
   }, [user]);
 
-  // --- RESTORED OFFLINE CACHE & FAILSAFE EFFECT ---
+  // --- RESTORED OFFLINE CACHE, FAILSAFE, & RECONNECT MERGE ---
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
@@ -1119,19 +1123,18 @@ export const UserProvider = ({ children }) => {
         startPedometer(); 
 
         const cacheKey = `@user_profile_${currentUser.uid}`;
+        const failsafeTimer = setTimeout(() => { setLoading(false); }, 2500);
 
-        // THE FAILSAFE: Force the app to unblock after 2.5s if offline
-        const failsafeTimer = setTimeout(() => {
-          setLoading(false);
-        }, 2500);
+        let localCache = null;
 
         // 1. INSTANT OFFLINE CACHE LOAD
         try {
           const cachedProfile = await AsyncStorage.getItem(cacheKey);
           if (cachedProfile) {
-            setUserData(JSON.parse(cachedProfile));
+            localCache = JSON.parse(cachedProfile);
+            setUserData(localCache);
             setLoading(false); // Unblocks Splash Screen Instantly!
-            clearTimeout(failsafeTimer); // Cancel failsafe, we got data!
+            clearTimeout(failsafeTimer); 
           }
         } catch (e) { 
           console.log("Cache read error:", e); 
@@ -1142,13 +1145,26 @@ export const UserProvider = ({ children }) => {
           doc(db, 'users', currentUser.uid), 
           async (docSnap) => {
             if (docSnap.exists()) {
-              const data = docSnap.data();
+              let data = docSnap.data();
               
               // --- RACE CONDITION FIX ---
               if (!data.email && currentUser.email) {
                 data.email = currentUser.email;
               }
-              // --------------------------
+
+              // --- OFFLINE SYNC RECOVERY ---
+              // If the phone's cache has more workout/water history than the server, 
+              // the user was active offline. We push the local data UP to Firebase!
+              if (localCache && localCache.history && data.history && localCache.history.length > data.history.length) {
+                data = { ...localCache }; 
+                try { await setDoc(doc(db, 'users', currentUser.uid), localCache); } catch(e) {}
+              }
+              
+              // Recover steps if tracked offline
+              if (localCache && localCache.stats && data.stats && localCache.stats.steps > data.stats.steps) {
+                data.stats.steps = localCache.stats.steps;
+                try { await updateDoc(doc(db, 'users', currentUser.uid), { "stats.steps": localCache.stats.steps }); } catch(e) {}
+              }
 
               checkAndMigrateDailyStats(currentUser.uid, data);
               
@@ -1161,18 +1177,25 @@ export const UserProvider = ({ children }) => {
               const finalData = { ...data, stats: safeStats, preferences: prefs };
               
               setUserData(finalData);
-              await AsyncStorage.setItem(cacheKey, JSON.stringify(finalData)); // Update Cache
+              localCache = finalData; // Update local reference so it doesn't infinitely sync
+
             } else {
-              // --- RACE CONDITION FIX (Fallback Data) ---
-              const fallbackData = {
-                ...INITIAL_USER_DATA,
-                email: currentUser.email || '',
-                name: currentUser.displayName || 'User',
-                profileImage: currentUser.photoURL || null
-              };
-              setDoc(doc(db, 'users', currentUser.uid), fallbackData);
-              setUserData(fallbackData);
-              // ------------------------------------------
+              // --- MISSING DOCUMENT FIX (Offline Setup Screen Bug) ---
+              // If Firestore returns no document, but we have a completed setup in the cache,
+              // we are likely offline. DO NOT SHOW SETUP SCREEN. Trust the cache.
+              if (localCache && localCache.isSetupComplete) {
+                setUserData(localCache);
+                try { await setDoc(doc(db, 'users', currentUser.uid), localCache); } catch(e) {}
+              } else {
+                const fallbackData = {
+                  ...INITIAL_USER_DATA,
+                  email: currentUser.email || '',
+                  name: currentUser.displayName || 'User',
+                  profileImage: currentUser.photoURL || null
+                };
+                try { await setDoc(doc(db, 'users', currentUser.uid), fallbackData); } catch(e) {}
+                setUserData(fallbackData);
+              }
             }
             setLoading(false); 
             clearTimeout(failsafeTimer);
