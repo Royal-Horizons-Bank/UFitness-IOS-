@@ -1,0 +1,65 @@
+name: UFitness iOS Unsigned Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: # Allows you to manually trigger the build from GitHub
+
+jobs:
+  build-ios:
+    name: Build Unsigned IPA for Sideloadly
+    runs-on: macos-latest
+    
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install NPM Dependencies
+        run: npm install
+
+      - name: 🏗️ Generate Native iOS Project (Liquid Glass Linking)
+        # The --clean flag is critical. It forces Expo to completely rebuild 
+        # the ios folder, ensuring the unstable-native-tabs are perfectly linked.
+        run: npx expo prebuild --platform ios --clean
+
+      - name: 🔗 Install CocoaPods
+        # Links all the native libraries required for the UI and sensors
+        run: |
+          cd ios
+          pod install
+
+      - name: 🔨 Compile App (No Code Signing)
+        # Directly invokes Xcode to build for real iPhones (iphoneos) while forcefully disabling signing
+        run: |
+          xcodebuild -workspace ios/UFitness.xcworkspace \
+            -scheme UFitness \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ./build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: 📦 Package into IPA for Sideloadly
+        # Sideloadly needs an .ipa file (which is just a zipped folder named 'Payload' containing the .app)
+        run: |
+          mkdir -p Payload
+          mv ./build/Build/Products/Release-iphoneos/UFitness.app Payload/
+          zip -r UFitness.ipa Payload
+
+      - name: 📤 Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UFitness-Unsigned-IPA
+          path: UFitness.ipa
+          retention-days: 7
