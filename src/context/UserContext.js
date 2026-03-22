@@ -1110,7 +1110,7 @@ export const UserProvider = ({ children }) => {
     return () => clearInterval(saveInterval);
   }, [user]);
 
-  // --- RESTORED OFFLINE CACHE IN INIT EFFECT ---
+  // --- RESTORED OFFLINE CACHE & FAILSAFE EFFECT ---
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
@@ -1120,12 +1120,18 @@ export const UserProvider = ({ children }) => {
 
         const cacheKey = `@user_profile_${currentUser.uid}`;
 
+        // THE FAILSAFE: Force the app to unblock after 2.5s if offline
+        const failsafeTimer = setTimeout(() => {
+          setLoading(false);
+        }, 2500);
+
         // 1. INSTANT OFFLINE CACHE LOAD
         try {
           const cachedProfile = await AsyncStorage.getItem(cacheKey);
           if (cachedProfile) {
             setUserData(JSON.parse(cachedProfile));
             setLoading(false); // Unblocks Splash Screen Instantly!
+            clearTimeout(failsafeTimer); // Cancel failsafe, we got data!
           }
         } catch (e) { 
           console.log("Cache read error:", e); 
@@ -1137,6 +1143,13 @@ export const UserProvider = ({ children }) => {
           async (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
+              
+              // --- RACE CONDITION FIX ---
+              if (!data.email && currentUser.email) {
+                data.email = currentUser.email;
+              }
+              // --------------------------
+
               checkAndMigrateDailyStats(currentUser.uid, data);
               
               if (sessionStartSteps.current === 0 && (data.stats?.steps || 0) > 0) {
@@ -1150,20 +1163,31 @@ export const UserProvider = ({ children }) => {
               setUserData(finalData);
               await AsyncStorage.setItem(cacheKey, JSON.stringify(finalData)); // Update Cache
             } else {
-              setDoc(doc(db, 'users', currentUser.uid), INITIAL_USER_DATA);
-              setUserData(INITIAL_USER_DATA);
+              // --- RACE CONDITION FIX (Fallback Data) ---
+              const fallbackData = {
+                ...INITIAL_USER_DATA,
+                email: currentUser.email || '',
+                name: currentUser.displayName || 'User',
+                profileImage: currentUser.photoURL || null
+              };
+              setDoc(doc(db, 'users', currentUser.uid), fallbackData);
+              setUserData(fallbackData);
+              // ------------------------------------------
             }
             setLoading(false); 
+            clearTimeout(failsafeTimer);
           },
           (error) => {
             console.log("Listener detached quietly or offline.");
             setLoading(false); 
+            clearTimeout(failsafeTimer);
           }
         );
 
         return () => { 
           if (unsubscribeSnapshot.current) unsubscribeSnapshot.current(); 
           if (pedometerSubscription) pedometerSubscription.remove(); 
+          clearTimeout(failsafeTimer);
         };
         
       } else { 

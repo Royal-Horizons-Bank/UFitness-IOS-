@@ -1,13 +1,13 @@
 import React, { useEffect } from 'react';
-import { View } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
 
 import { UserProvider, useUser } from '../src/context/UserContext';
+import { PALETTE } from '../src/constants/theme';
 
-// Keep the native splash screen visible while loading
 SplashScreen.preventAutoHideAsync();
 
 const RootNavigation = () => {
@@ -15,19 +15,19 @@ const RootNavigation = () => {
   const segments = useSegments();
   const router = useRouter();
 
-  // GUARD: If we have an active user token but the database hasn't populated 
-  // the email yet, we are holding placeholder data and must wait before routing.
+  // STRICT GUARD: If we have an active user token but the database hasn't populated 
+  // the email yet, we are holding placeholder data and MUST WAIT before routing.
   const isSyncing = user && (!userData || !userData.email);
   const isAppReady = !loading && !isSyncing;
 
-  // 1. SPLASH SCREEN EFFECT
+  // SPLASH SCREEN EFFECT
   useEffect(() => {
     if (isAppReady) {
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [isAppReady]);
 
-  // 2. ROUTING EFFECT
+  // ROUTING EFFECT
   useEffect(() => {
     if (!isAppReady) return;
 
@@ -43,9 +43,13 @@ const RootNavigation = () => {
     }
   }, [user, userData, isAppReady, segments]);
 
-  // Keep rendering null so the native splash screen stays locked until we are ready
+  // Lock the screen to prevent routing race conditions
   if (!isAppReady) {
-    return null; 
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#FF3B30" />
+      </View>
+    ); 
   }
 
   return (

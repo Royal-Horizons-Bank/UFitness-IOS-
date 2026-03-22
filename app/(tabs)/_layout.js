@@ -18,6 +18,7 @@ export default function TabsLayout() {
   if (Platform.OS === 'ios') {
     return (
       <NativeTabs
+        translucent={true} // <-- FIX: Forces true native glass and prevents disappearing on scroll
         iconColor={{
           default: colors.textDim,
           selected: colors.primary,
@@ -80,6 +81,7 @@ export default function TabsLayout() {
         tabBarShowLabel: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textDim,
+        tabBarTransparent: true, // <-- FIX: Disables the disappearing background bug on scroll
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '600',
@@ -91,6 +93,7 @@ export default function TabsLayout() {
             height: 72 + androidBottomInset, 
             paddingBottom: androidBottomInset + 16, 
             paddingTop: 0, 
+            backgroundColor: 'transparent', // <-- FIX: Must be strictly transparent for BlurView to persist
           }
         ],
         tabBarBackground: () => (
